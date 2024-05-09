@@ -1,0 +1,227 @@
+---
+title: "Bioinformatics in R Proect"
+author: "alexander marnoff adapted from: J. Cesar Ignacio Espinoza - Cesar"
+date: "April 9 2024"
+output: 
+  html_document: 
+    highlight: espresso
+    theme: cerulean
+---
+
+```{r setup}
+    ### Edit this line so your notebook renders properly
+    knitr::opts_knit$set(root.dir = normalizePath("~/Rclass/project")) 
+```
+
+```{r}
+#if (!require("BiocManager", quietly = TRUE))
+  #  install.packages("BiocManager")
+
+#BiocManager::install("DESeq2")
+```
+
+We now load the libraries
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE, results="hide"}
+# We first need to import the important libnrary for today's class, dplyr
+library(dplyr)
+library(readr)
+library(DESeq2)
+library(ggplot2)
+
+```
+
+```{r}
+### Run this chunk to import the counts table and metadata into your evironment.
+counts <- read.csv('UseCounts.csv', row.names = 1, header = TRUE)
+metadata <- read.csv('metadata.csv', row.names = 1, header = TRUE)
+```
+
+```{r}
+### Create a new data object called it sample_info, use the same information as metadata but remove the GEO_ID Column, and change the name from dex to dexamethasone in the header, show your code here
+
+sample_info <- metadata %>%
+  dplyr::select(Treatment) %>%
+  dplyr::rename(Treatment = Treatment)
+sample_info
+
+```
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = counts, 
+                              colData = sample_info,
+                              design = ~ Treatment)
+```
+
+```{r}
+
+#dds
+# You can recover the original counts matrix with the counts function!
+#counts(dds)
+```
+
+```{r}
+subset_dds <- dds[rowSums(counts(dds)) >10]
+subset_dds
+```
+
+```{r}
+relevel(dds$Treatment, ref = 'PBS')
+```
+
+N
+
+```{r}
+deseq_ob <- DESeq(subset_dds)
+```
+
+```{r}
+### Chunk 1
+#counts(dds)
+```
+
+```{r}
+#DESeq()
+res <- results(deseq_ob, alpha = 0.05)
+res
+```
+
+```{r}
+summary(res)
+```
+
+```{r}
+plotMA(deseq_ob)
+```
+
+```{r}
+#BiocManager::install("gprofiler")
+#BiocManager::install("EnahancedVolcano")
+
+```
+
+```{r}
+library(EnhancedVolcano)
+sigs.df = as.data.frame(res)
+sigs.df$symbol <- mapIds(org.Mm.eg.db, keys= rownames(sigs.df), keytype = 'ENSEMBL', colum = "SYMBOL")
+#EnhancedVolcano(sigs.df, x='log2FoldChange', y = 'padj', lab = rownames(sigs.df))
+Volcanoplot <- EnhancedVolcano(sigs.df, x='log2FoldChange', y = 'padj', lab = sigs.df$symbol)
+
+png("1out.png" , res = 250, width = 3000, height = 2000)
+print(Volcanoplot)
+dev.off()
+
+Volcanoplot
+```
+
+```{r}
+
+  p1 <- EnhancedVolcano(sigs.df,
+    lab = rownames(sigs.df),
+    x = "log2FoldChange",
+    y = "pvalue",
+    pCutoff = 10e-4,
+    FCcutoff = 2,
+    ylim = c(0, -log10(10e-60)),
+    pointSize = c(ifelse(res$log2FoldChange>2, 8, 1)),
+    labSize = 6.0,
+    shape = c(2, 3, 4, 5),
+    title = "DESeq2 results",
+    subtitle = "Differential expression",
+    caption = bquote(~Log[2]~ "fold change cutoff, 2; p-value cutoff, 10e-4"),
+    legendPosition = "right",
+    legendLabSize = 14,
+    col = c("grey30", "forestgreen", "royalblue", "red2"),
+    colAlpha = 0.9,
+    drawConnectors = TRUE,
+    hline = c(10e-8),
+    widthConnectors = 0.5)
+
+  p1
+```
+
+```{r}
+#if (!require("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
+#BiocManager::install("org.Mm.eg.db")
+
+library("org.Mm.eg.db")
+```
+
+```{r}
+library(ComplexHeatmap)
+diff.df <- as.data.frame(sigs.df)
+diff.df <- diff.df %>%
+  filter(padj < 0.05)
+```
+
+```{r}
+#deseq_ob <- DESeq(subset_dds)
+```
+
+```{r}
+mat <- counts(deseq_ob, normalized = T)[rownames(diff.df),]
+mat.z <- t(apply(mat,1, scale))
+colnames(mat.z) <- colnames(mat)
+heatM <- Heatmap(mat.z, cluster_rows= T, cluster_columns= T, name = "Z-score")
+        #row_labels = diff.df[rownames(mat.z),]$symbol)
+png("2out.png" , res = 250, width = 3000, height = 2000)
+print(heatM)
+dev.off()
+```
+
+```{R}
+diff.df <- as.data.frame(sigs.df)
+diff.df <- diff.df %>%
+  filter(padj < 0.05, log2FoldChange > 3.5, baseMean > 100)
+
+mat <- counts(deseq_ob, normalized = T)[rownames(diff.df),]
+mat.z <- t(apply(mat,1, scale))
+colnames(mat.z) <- colnames(mat)
+ndHeat <- Heatmap(mat.z, cluster_rows= T, cluster_columns= T, name = "Z-score", row_labels = diff.df[rownames(mat.z),]$symbol)
+
+png("2out.png" , res = 250, width = 3000, height = 2000)
+print(ndHeat)
+dev.off()
+
+ndHeat
+```
+
+```{r}
+library(clusterProfiler)
+diff.df <- as.data.frame(sigs.df)
+diff.df <- diff.df %>%
+  filter(padj < 0.05)
+
+genes_to_test <- rownames(diff.df)
+GO_results <- enrichGO(gene = genes_to_test, OrgDb = "org.Mm.eg.db", keyType = 'ENSEMBL', ont = "")
+```
+
+```{r}
+fit <- plot(barplot(GO_results, showCategory=15))
+
+png("out.png" , res = 250, width = 3000, height = 2000)
+print(fit)
+dev.off()
+
+fit
+```
+
+```{r}
+as.data.frame(GO_results)
+```
+
+```{r}
+library(gprofiler2) 
+go_upreg <- gost(genes_to_test, organism = 'mmusculus', significant = T)
+gostplot(go_upreg, interactive = T)
+```
+
+```{r}
+
+res <- res[order(-res$stat),]
+gene_list <- res$stat
+names(gene_list) <- rownames(res)
+gse <- gseGO(gene_list, ont = "BP", keyType = "ENSEMBL", OrgDb ="org.Mm.eg.db", eps = 1e-300 )
+gseaplot(gse, geneSetID = "GO:0046324" )
+```
